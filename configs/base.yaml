@@ -1,0 +1,44 @@
+postgres:
+  source_schema: customer_app
+  dwh_schema: dwh
+  jdbc_driver: org.postgresql.Driver
+
+lakehouse:
+  write_mode: overwrite
+
+batch:
+  load_type: full
+  lookback_minutes: 5
+  source_tables:
+    - app_users
+    - user_addresses
+    - shops
+    - categories
+    - products
+    - product_variants
+    - vouchers
+    - orders
+    - order_items
+    - order_vouchers
+    - payments
+    - shipments
+  incremental_column: updated_at
+  incremental_tables:
+    app_users: updated_at
+    user_addresses: updated_at
+    shops: updated_at
+    products: updated_at
+    product_variants: updated_at
+    vouchers: updated_at
+    orders: updated_at
+    payments: updated_at
+    shipments: updated_at
+
+spark:
+  config:
+    spark.sql.session.timeZone: UTC
+    spark.sql.sources.partitionOverwriteMode: dynamic
+
+secrets:
+  provider: env
+  key_vault_url:

@@ -1,0 +1,30 @@
+environment: azure
+
+postgres:
+  host: ${AZURE_POSTGRES_HOST}
+  port: ${AZURE_POSTGRES_PORT:5432}
+  database: ${AZURE_POSTGRES_DB:ecommerce}
+  user: ${AZURE_POSTGRES_USER}
+  password: ${AZURE_POSTGRES_PASSWORD}
+
+lakehouse:
+  base_path: abfss://${AZURE_CONTAINER}@${AZURE_STORAGE_ACCOUNT}.dfs.core.windows.net/ecommerce
+  format: delta
+  checkpoint_path: abfss://${AZURE_CONTAINER}@${AZURE_STORAGE_ACCOUNT}.dfs.core.windows.net/ecommerce/_checkpoints
+
+batch:
+  run_id_prefix: azure_batch
+  watermark_path: /dbfs/tmp/ecommerce_pipeline/watermarks.json
+
+spark:
+  app_name: ecommerce-batch-azure
+  master:
+  config:
+    spark.sql.shuffle.partitions: "16"
+    spark.sql.extensions: io.delta.sql.DeltaSparkSessionExtension
+    spark.sql.catalog.spark_catalog: org.apache.spark.sql.delta.catalog.DeltaCatalog
+    spark.databricks.delta.schema.autoMerge.enabled: "true"
+
+secrets:
+  provider: azure_key_vault
+  key_vault_url: ${AZURE_KEY_VAULT_URL:}
