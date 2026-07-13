@@ -57,6 +57,55 @@ make lint
 make docker-build
 ```
 
+`make seed` resets and bootstraps the OLTP database, then keeps inserting small
+order batches every few seconds for incremental/CDC demos. Use `make seed-once`
+for the old one-shot reset seed, or `make seed-stream` to append realtime-like
+changes without resetting existing source data.
+
+## Hybrid Student-Azure Mode
+
+For the low-cost student setup, keep PostgreSQL and ADLS Gen2 on Azure but run
+Spark transforms locally:
+
+```bash
+make install-cloud
+make preflight
+make bootstrap-source
+make seed-stream
+make run-cloud-full
+make run-cloud-incremental
+make validate
+```
+
+The default `CONFIG` is `configs/azure.yaml`. That config uses local Spark
+(`local[*]`) while reading PostgreSQL over JDBC and writing Delta tables to
+`abfss://lakehouse@<storage-account>.dfs.core.windows.net/ecommerce`.
+
+Required `.env` values:
+
+```text
+AZURE_POSTGRES_HOST
+AZURE_POSTGRES_USER
+AZURE_POSTGRES_PASSWORD
+AZURE_STORAGE_ACCOUNT
+AZURE_STORAGE_ACCOUNT_KEY
+```
+
+`AZURE_CONTAINER`, `AZURE_STORAGE_AUTH_TYPE`, PostgreSQL port/database, and
+SSL mode all have defaults in `configs/azure.yaml`.
+
+If the Azure PostgreSQL database is empty because you created it manually,
+run `make bootstrap-source` once. It creates the `customer_app` schema from
+`schema/oltpSchema.sql` and inserts baseline synthetic data.
+
+Use `make run-cloud-full` for the first lakehouse build or an intentional
+backfill. Use `make run-cloud-incremental` for the regular CDC-style runs after
+that. Keep `.env` for stable infrastructure settings only; load type is a run
+parameter.
+
+Use `CONFIG=configs/local.yaml make <target>` when you want the old fully local
+Docker/PostgreSQL + local Parquet mode.
+
 CI/CD lives in:
 
 ```text

@@ -1,6 +1,5 @@
 postgres:
   source_schema: customer_app
-  dwh_schema: dwh
   jdbc_driver: org.postgresql.Driver
 
 lakehouse:
@@ -22,7 +21,6 @@ batch:
     - order_vouchers
     - payments
     - shipments
-  incremental_column: updated_at
   incremental_tables:
     app_users: updated_at
     user_addresses: updated_at

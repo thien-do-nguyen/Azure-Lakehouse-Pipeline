@@ -9,10 +9,10 @@ from ecommerce_pipeline.watermark import get_watermark, update_watermark
 
 def _read_incremental_table(config: AppConfig, spark, table_name: str, incremental_column: str):
     previous_watermark = get_watermark(config, table_name)
-    qualified_table = f"{config.postgres.source_schema}.{table_name}"
     if previous_watermark is None:
         return read_postgres_table(spark, config, table_name)
 
+    qualified_table = f"{config.postgres.source_schema}.{table_name}"
     query = f"""
         SELECT *
         FROM {qualified_table}

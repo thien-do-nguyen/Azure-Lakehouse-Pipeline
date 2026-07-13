@@ -4,35 +4,35 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ecommerce-pipeline"
-version = "0.2.0"
+version = "0.3.0"
 description = "Local-first, cloud-ready ecommerce medallion data pipeline."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-  "delta-spark>=3.2,<4.0",
-  "pyspark>=3.5,<4.0",
-  "PyYAML>=6.0,<7.0",
-  "psycopg[binary]>=3.1,<4.0",
-  "fsspec>=2024.6.0",
+    "delta-spark>=3.2,<4.0",
+    "pyspark>=3.5,<4.0",
+    "PyYAML>=6.0,<7.0",
+    "psycopg[binary]>=3.1,<4.0",
+    "fsspec>=2024.6.0",
 ]
 
 [project.optional-dependencies]
 azure = [
-  "adlfs>=2024.7.0",
-  "azure-identity>=1.17.0",
-  "azure-keyvault-secrets>=4.8.0",
+    "adlfs>=2024.7.0",
+    "azure-identity>=1.17.0",
+    "azure-keyvault-secrets>=4.8.0",
 ]
 dev = [
-  "black>=24.4.0",
-  "coverage>=7.5.0",
-  "mypy>=1.10.0",
-  "pre-commit>=3.7.0",
-  "pytest>=8.2.0",
-  "pytest-cov>=5.0.0",
-  "ruff>=0.5.0",
+    "black>=24.4.0",
+    "coverage>=7.5.0",
+    "mypy>=1.10.0",
+    "pre-commit>=3.7.0",
+    "pytest>=8.2.0",
+    "pytest-cov>=5.0.0",
+    "ruff>=0.5.0",
 ]
 orchestration = [
-  "prefect>=3.0.0",
+    "prefect>=3.0.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -61,7 +61,7 @@ warn_unused_ignores = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
-  "integration: tests that require Docker/PostgreSQL or existing lakehouse data",
+    "integration: tests that require Docker/PostgreSQL or existing lakehouse data",
 ]
 addopts = "--cov=ecommerce_pipeline --cov-report=term-missing --cov-fail-under=80"
 
@@ -69,19 +69,20 @@ addopts = "--cov=ecommerce_pipeline --cov-report=term-missing --cov-fail-under=8
 branch = true
 source = ["src/ecommerce_pipeline"]
 omit = [
-  "src/ecommerce_pipeline/delta.py",
-  "src/ecommerce_pipeline/seed/*",
-  "src/ecommerce_pipeline/orchestration/*",
-  "src/ecommerce_pipeline/preflight.py",
-  "src/ecommerce_pipeline/jobs/inspect.py",
-  "src/ecommerce_pipeline/jobs/run_batch.py",
-  "src/ecommerce_pipeline/jobs/gold_transforms.py",
+    "src/ecommerce_pipeline/delta.py",
+    "src/ecommerce_pipeline/seed/*",
+    "src/ecommerce_pipeline/orchestration/*",
+    "src/ecommerce_pipeline/preflight.py",
+    "src/ecommerce_pipeline/jobs/inspect.py",
+    "src/ecommerce_pipeline/jobs/run_batch.py",
+    "src/ecommerce_pipeline/jobs/gold_transforms.py",
+    "src/ecommerce_pipeline/secrets.py",
 ]
 
 [tool.coverage.report]
 show_missing = true
 skip_covered = true
 exclude_lines = [
-  "if __name__ == .__main__.:",
-  "pragma: no cover",
+    "if __name__ == '__main__':",
+    "pragma: no cover",
 ]

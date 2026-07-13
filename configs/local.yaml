@@ -10,10 +10,8 @@ postgres:
 lakehouse:
   base_path: ./data/lake
   format: parquet
-  checkpoint_path: ./data/checkpoints
 
 batch:
-  run_id_prefix: local_batch
   watermark_path: ./data/state/watermarks.json
 
 spark:

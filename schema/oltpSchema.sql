@@ -11,8 +11,6 @@
 --
 -- =====================================================
 
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
-
 DROP SCHEMA IF EXISTS customer_app CASCADE;
 CREATE SCHEMA customer_app;
 SET search_path TO customer_app, public;
