@@ -64,6 +64,7 @@ def test_incremental_source_uses_watermark_query(monkeypatch, spark, local_confi
     assert result.count() == 1
     assert "customer_app.orders" in captured["query"]
     assert "updated_at" in captured["query"]
+    assert "SELECT *" in captured["query"]
 
 
 def test_save_incremental_watermark(spark, local_config) -> None:

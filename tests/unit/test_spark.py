@@ -5,6 +5,7 @@ from dataclasses import replace
 import pytest
 
 from ecommerce_pipeline import spark as spark_module
+from ecommerce_pipeline.config import AzureStorageConfig
 
 
 class _FakeSparkContext:
@@ -61,3 +62,21 @@ def test_build_spark_requires_delta_dependency(monkeypatch, local_config) -> Non
 
     with pytest.raises(RuntimeError, match="Install delta-spark"):
         spark_module.build_spark(config)
+
+
+def test_build_spark_injects_account_key_storage_auth(monkeypatch, local_config) -> None:
+    fake_builder = _FakeBuilder()
+    monkeypatch.setattr(spark_module.SparkSession, "builder", fake_builder)
+    monkeypatch.setenv("AZURE_STORAGE_ACCOUNT_KEY", "storage-secret")
+    config = replace(
+        local_config,
+        azure_storage=AzureStorageConfig(
+            auth_type="account_key",
+            account_name="lakeacct",
+            container="lakehouse",
+        ),
+    )
+
+    spark_module.build_spark(config)
+
+    assert ("config", "fs.azure.account.key.lakeacct.dfs.core.windows.net", "storage-secret") in fake_builder.calls

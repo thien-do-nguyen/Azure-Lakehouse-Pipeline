@@ -38,7 +38,6 @@ def local_config(tmp_path: Path):
         lakehouse=replace(
             config.lakehouse,
             base_path=str(tmp_path / "lake"),
-            checkpoint_path=str(tmp_path / "checkpoints"),
         ),
         batch=replace(config.batch, watermark_path=str(tmp_path / "state" / "watermarks.json")),
     )

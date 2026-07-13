@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -38,12 +39,46 @@ def run_preflight(config_path: str) -> list[Check]:
     java_ok, java_detail = _run(["java", "-version"]) if _command_exists("java") else (False, "missing java")
     checks.append(Check("java", java_ok, java_detail))
 
-    docker_ok, docker_detail = (
-        _run(["docker", "version", "--format", "{{.Server.Version}}"])
-        if _command_exists("docker")
-        else (False, "missing docker")
-    )
-    checks.append(Check("docker", docker_ok, docker_detail))
+    if config.environment == "local":
+        docker_ok, docker_detail = (
+            _run(["docker", "version", "--format", "{{.Server.Version}}"])
+            if _command_exists("docker")
+            else (False, "missing docker")
+        )
+        checks.append(Check("docker", docker_ok, docker_detail))
+
+    if config.azure_storage is not None:
+        az = config.azure_storage
+        checks.append(Check("azure_storage_account", bool(az.account_name), az.account_name or "missing"))
+        if az.auth_type == "account_key":
+            checks.append(
+                Check(
+                    "azure_storage_account_key",
+                    bool(os.getenv("AZURE_STORAGE_ACCOUNT_KEY")),
+                    "set" if os.getenv("AZURE_STORAGE_ACCOUNT_KEY") else "missing AZURE_STORAGE_ACCOUNT_KEY",
+                )
+            )
+        elif az.auth_type == "sas":
+            checks.append(
+                Check(
+                    "azure_storage_sas_token",
+                    bool(os.getenv("AZURE_STORAGE_SAS_TOKEN")),
+                    "set" if os.getenv("AZURE_STORAGE_SAS_TOKEN") else "missing AZURE_STORAGE_SAS_TOKEN",
+                )
+            )
+        elif az.auth_type == "service_principal":
+            missing = [
+                name
+                for name in ["AZURE_TENANT_ID", "AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET"]
+                if not os.getenv(name)
+            ]
+            checks.append(
+                Check(
+                    "azure_storage_service_principal",
+                    not missing,
+                    "set" if not missing else f"missing {', '.join(missing)}",
+                )
+            )
     return checks
 
 

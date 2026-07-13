@@ -32,7 +32,10 @@ RUN apt-get update \
 COPY --from=builder /wheels /wheels
 COPY . .
 
-RUN python -m pip install --no-cache-dir /wheels/*.whl
+RUN python -m pip install --no-cache-dir /wheels/*.whl \
+    "adlfs>=2024.7.0" \
+    "azure-identity>=1.17.0" \
+    "azure-keyvault-secrets>=4.8.0"
 
 ENTRYPOINT ["python", "-m", "ecommerce_pipeline.jobs.run_batch"]
 CMD ["--config", "configs/local.yaml"]

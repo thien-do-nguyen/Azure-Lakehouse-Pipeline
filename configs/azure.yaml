@@ -6,25 +6,40 @@ postgres:
   database: ${AZURE_POSTGRES_DB:ecommerce}
   user: ${AZURE_POSTGRES_USER}
   password: ${AZURE_POSTGRES_PASSWORD}
+  sslmode: ${AZURE_POSTGRES_SSLMODE:require}
 
 lakehouse:
-  base_path: abfss://${AZURE_CONTAINER}@${AZURE_STORAGE_ACCOUNT}.dfs.core.windows.net/ecommerce
+  base_path: abfss://${AZURE_CONTAINER:lakehouse}@${AZURE_STORAGE_ACCOUNT}.dfs.core.windows.net/ecommerce
   format: delta
-  checkpoint_path: abfss://${AZURE_CONTAINER}@${AZURE_STORAGE_ACCOUNT}.dfs.core.windows.net/ecommerce/_checkpoints
 
 batch:
-  run_id_prefix: azure_batch
-  watermark_path: /dbfs/tmp/ecommerce_pipeline/watermarks.json
+  load_type: ${BATCH_LOAD_TYPE:full}
+  watermark_path: abfss://${AZURE_CONTAINER:lakehouse}@${AZURE_STORAGE_ACCOUNT}.dfs.core.windows.net/ecommerce/_state/watermarks.json
+  lookback_minutes: ${BATCH_LOOKBACK_MINUTES:60}
 
 spark:
   app_name: ecommerce-batch-azure
-  master:
+  master: ${SPARK_MASTER:local[*]}
   config:
     spark.sql.shuffle.partitions: "16"
+    spark.jars.packages: org.postgresql:postgresql:42.7.3,org.apache.hadoop:hadoop-azure:3.3.4
     spark.sql.extensions: io.delta.sql.DeltaSparkSessionExtension
     spark.sql.catalog.spark_catalog: org.apache.spark.sql.delta.catalog.DeltaCatalog
     spark.databricks.delta.schema.autoMerge.enabled: "true"
+    # Hadoop / ABFS tuning
+    fs.azure.account.unknown.timeout: "300"
+    spark.hadoop.fs.abfss.impl: org.apache.hadoop.fs.azurebfs.SecureAzureBlobFileSystem
+    spark.hadoop.fs.abfs.impl: org.apache.hadoop.fs.azurebfs.SecureAzureBlobFileSystem
+
+# Azure Storage authentication (used by spark.py to inject credentials)
+# Supported auth_type values: sas, account_key, service_principal, managed_identity, default
+azure_storage:
+  auth_type: ${AZURE_STORAGE_AUTH_TYPE:account_key}
+  account_name: ${AZURE_STORAGE_ACCOUNT}
+  container: ${AZURE_CONTAINER:lakehouse}
+  tenant_id: ${AZURE_TENANT_ID:}
+  client_id: ${AZURE_CLIENT_ID:}
 
 secrets:
-  provider: azure_key_vault
+  provider: ${SECRETS_PROVIDER:env}
   key_vault_url: ${AZURE_KEY_VAULT_URL:}
