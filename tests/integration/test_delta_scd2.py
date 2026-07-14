@@ -51,9 +51,17 @@ def test_scd2_merge_closes_old_record_and_inserts_new(tmp_path) -> None:
         }
         scd2_merge(spark, initial, path, **merge_options)
 
+        earlier_history_start = registered - timedelta(days=5)
+        backfill = spark.createDataFrame(
+            [(1, "alice@example.com", "active", earlier_history_start, registered, registered)],
+            columns,
+        )
+        backfill = add_scd2_hash(backfill, ["email", "customer_status"])
+        scd2_merge(spark, backfill, path, **merge_options)
+
         login_at = registered + timedelta(hours=1)
         type1 = spark.createDataFrame(
-            [(1, "alice@example.com", "active", registered, login_at, login_at)],
+            [(1, "alice@example.com", "active", earlier_history_start, login_at, login_at)],
             columns,
         )
         type1 = add_scd2_hash(type1, ["email", "customer_status"])
@@ -79,6 +87,7 @@ def test_scd2_merge_closes_old_record_and_inserts_new(tmp_path) -> None:
         assert any(
             row["email"] == "alice@example.com"
             and not row["is_current"]
+            and row["start_date"] == earlier_history_start
             and row["end_date"] == changed_at
             and row["last_login_at"] == login_at
             for row in rows

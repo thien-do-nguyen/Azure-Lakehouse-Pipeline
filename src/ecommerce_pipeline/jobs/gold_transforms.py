@@ -61,8 +61,15 @@ def _read_gold_source_table(spark, config: AppConfig, table_name: str) -> DataFr
     return read_layer_table(spark, config, "silver", table_name)
 
 
-def build_dim_customer(users: DataFrame) -> DataFrame:
-    return users.select(
+def build_dim_customer(users: DataFrame, orders: DataFrame | None = None) -> DataFrame:
+    customer_source = users
+    if orders is not None:
+        first_orders = orders.groupBy("customer_id").agg(F.min("created_at").alias("first_order_at"))
+        customer_source = users.join(first_orders, users.user_id == first_orders.customer_id, "left")
+    else:
+        customer_source = users.withColumn("first_order_at", F.lit(None).cast("timestamp"))
+
+    return customer_source.select(
         F.col("user_id").alias("source_customer_id"),
         F.col("public_user_id").alias("public_customer_id"),
         "username",
@@ -76,7 +83,7 @@ def build_dim_customer(users: DataFrame) -> DataFrame:
         F.col("updated_at").alias("source_updated_at"),
         F.col("last_login").alias("last_login_at"),
         F.lit(True).alias("is_current"),
-        F.col("created_at").cast("timestamp").alias("start_date"),
+        F.least(F.col("created_at"), F.col("first_order_at")).cast("timestamp").alias("start_date"),
         F.lit("9999-12-31 00:00:00").cast("timestamp").alias("end_date"),
         _natural_hash("username", "email", "first_name", "last_name", "phone_number", "status").alias("scd_hash"),
         F.current_timestamp().alias("created_at"),
@@ -141,7 +148,7 @@ def build_gold_tables(
         F.current_timestamp().alias("updated_at"),
     )
 
-    dim_customer = build_dim_customer(users)
+    dim_customer = build_dim_customer(users, orders)
     fact_customer_dimension = (
         customer_history
         if customer_history is not None

@@ -221,19 +221,20 @@ def scd2_merge(
         )
     new_versions.write.format("delta").mode("append").save(path)
 
-    if type1_columns:
-        updates = {column: f"source.{column}" for column in type1_columns if column in target_columns}
+    same_version_updates = {column: f"source.{column}" for column in type1_columns if column in target_columns}
+    if start_date_col in target_columns and start_date_col in prepared_source.columns:
+        same_version_updates[start_date_col] = f"least(target.{start_date_col}, source.{start_date_col})"
+    if same_version_updates:
         if "updated_at" in target_columns:
-            updates["updated_at"] = "current_timestamp()"
-        if updates:
-            same_version_condition = (
-                " AND ".join(f"target.{key} = source.{key}" for key in natural_keys)
-                + f" AND target.{current_col} = true"
-                + f" AND target.{tracked_hash_column} = source.{tracked_hash_column}"
-            )
-            (
-                delta_table.alias("target")
-                .merge(prepared_source.alias("source"), same_version_condition)
-                .whenMatchedUpdate(set=updates)
-                .execute()
-            )
+            same_version_updates["updated_at"] = "current_timestamp()"
+        same_version_condition = (
+            " AND ".join(f"target.{key} = source.{key}" for key in natural_keys)
+            + f" AND target.{current_col} = true"
+            + f" AND target.{tracked_hash_column} = source.{tracked_hash_column}"
+        )
+        (
+            delta_table.alias("target")
+            .merge(prepared_source.alias("source"), same_version_condition)
+            .whenMatchedUpdate(set=same_version_updates)
+            .execute()
+        )

@@ -8,7 +8,10 @@ from ecommerce_pipeline.jobs.gold_transforms import build_dim_customer, build_go
 
 def run_gold(config: AppConfig, spark) -> None:
     if config.lakehouse.format == "delta":
-        customer_source = build_dim_customer(read_layer_table(spark, config, "silver", "app_users"))
+        customer_source = build_dim_customer(
+            read_layer_table(spark, config, "silver", "app_users"),
+            read_layer_table(spark, config, "silver", "orders"),
+        )
         scd2_merge(
             spark=spark,
             source_df=customer_source,

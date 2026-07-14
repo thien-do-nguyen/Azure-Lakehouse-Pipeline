@@ -6,6 +6,23 @@ from decimal import Decimal
 from ecommerce_pipeline.jobs import gold_transforms
 
 
+def test_build_dim_customer_starts_first_version_at_first_order_when_history_predates_registration(spark) -> None:
+    registered_at = datetime(2026, 5, 18, 7, 34, 52)
+    first_order_at = datetime(2026, 5, 16, 14, 25, 52)
+    users = spark.createDataFrame(
+        [(32, "u-32", "alice", "alice@example.com", "Alice", "A", "0900", "active", registered_at, registered_at, registered_at)],
+        ["user_id", "public_user_id", "username", "email", "first_name", "last_name", "phone_number", "status", "created_at", "updated_at", "last_login"],
+    )
+    orders = spark.createDataFrame(
+        [(2, 32, first_order_at), (3, 32, datetime(2026, 5, 20, 8, 0, 0))],
+        ["order_id", "customer_id", "created_at"],
+    )
+
+    row = gold_transforms.build_dim_customer(users, orders).select("start_date").first()
+
+    assert row["start_date"] == first_order_at
+
+
 def test_build_gold_tables_links_fact_to_temporal_customer_version(monkeypatch, spark, local_config) -> None:
     ts = datetime(2026, 1, 2, 12)
     tables = {
@@ -42,4 +59,3 @@ def test_build_gold_tables_links_fact_to_temporal_customer_version(monkeypatch, 
         "dim_product", "dim_promotion", "dim_payment", "dim_shipping", "fact_sales",
     }
     assert fact[0]["customer_key"] == 101
-
