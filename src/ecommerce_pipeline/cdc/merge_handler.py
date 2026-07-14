@@ -33,7 +33,7 @@ class CdcMergeHandler:
 
     def _prepare_table_events(self, table_name: str, events: DataFrame) -> DataFrame:
         keys = self._primary_keys(table_name)
-        schema = self.registry.resolve_table_schema(table_name, events)
+        schema = self.registry.resolve_table_schema(table_name, events, primary_keys=keys)
         parsed = events.withColumn("_record", F.from_json(F.col("record_json"), schema))
 
         key_columns = [self._primary_key_column(key).alias(key) for key in keys]
@@ -111,7 +111,7 @@ class CdcMergeHandler:
             }:
                 aligned = aligned.withColumn(
                     field.name,
-                    F.to_timestamp(F.from_unixtime(F.col(field.name).cast("double") / F.lit(1000))),
+                    (F.col(field.name).cast("double") / F.lit(1000)).cast("timestamp"),
                 )
             elif isinstance(field.dataType, DateType) and source_types.get(field.name) in {
                 "tinyint", "smallint", "int", "bigint", "long"

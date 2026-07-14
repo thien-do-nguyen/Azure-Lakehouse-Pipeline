@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pyspark.sql import DataFrame
+from pyspark.sql import DataFrame, Window
 from pyspark.sql import functions as F
 
 from ecommerce_pipeline.config import AppConfig
@@ -61,7 +61,34 @@ def _read_gold_source_table(spark, config: AppConfig, table_name: str) -> DataFr
     return read_layer_table(spark, config, "silver", table_name)
 
 
-def build_gold_tables(config: AppConfig, spark) -> dict[str, DataFrame]:
+def build_dim_customer(users: DataFrame) -> DataFrame:
+    return users.select(
+        F.col("user_id").alias("source_customer_id"),
+        F.col("public_user_id").alias("public_customer_id"),
+        "username",
+        "email",
+        "first_name",
+        "last_name",
+        F.concat_ws(" ", "first_name", "last_name").alias("full_name"),
+        "phone_number",
+        F.col("status").cast("string").alias("customer_status"),
+        F.col("created_at").alias("registered_at"),
+        F.col("updated_at").alias("source_updated_at"),
+        F.col("last_login").alias("last_login_at"),
+        F.lit(True).alias("is_current"),
+        F.col("created_at").cast("timestamp").alias("start_date"),
+        F.lit("9999-12-31 00:00:00").cast("timestamp").alias("end_date"),
+        _natural_hash("username", "email", "first_name", "last_name", "phone_number", "status").alias("scd_hash"),
+        F.current_timestamp().alias("created_at"),
+        F.current_timestamp().alias("updated_at"),
+    )
+
+
+def build_gold_tables(
+    config: AppConfig,
+    spark,
+    customer_history: DataFrame | None = None,
+) -> dict[str, DataFrame]:
     users = _read_gold_source_table(spark, config, "app_users")
     addresses = _read_gold_source_table(spark, config, "user_addresses")
     shops = _read_gold_source_table(spark, config, "shops")
@@ -114,28 +141,14 @@ def build_gold_tables(config: AppConfig, spark) -> dict[str, DataFrame]:
         F.current_timestamp().alias("updated_at"),
     )
 
-    dim_customer = _keyed(
-        users.select(
-            F.col("user_id").alias("source_customer_id"),
-            F.col("public_user_id").alias("public_customer_id"),
-            "username",
-            "email",
-            "first_name",
-            "last_name",
-            F.concat_ws(" ", "first_name", "last_name").alias("full_name"),
-            "phone_number",
-            F.col("status").cast("string").alias("customer_status"),
-            F.col("created_at").alias("registered_at"),
-            F.col("last_login").alias("last_login_at"),
-            F.lit(True).alias("is_current"),
-            F.lit("1900-01-01 00:00:00").cast("timestamp").alias("start_date"),
-            F.lit("9999-12-31 00:00:00").cast("timestamp").alias("end_date"),
-            _natural_hash("username", "email", "first_name", "last_name", "phone_number", "status").alias("scd_hash"),
-            F.current_timestamp().alias("created_at"),
-            F.current_timestamp().alias("updated_at"),
-        ),
-        "customer_key",
-        ["source_customer_id"],
+    dim_customer = build_dim_customer(users)
+    fact_customer_dimension = (
+        customer_history
+        if customer_history is not None
+        else dim_customer.withColumn(
+            "customer_key",
+            _stable_hash("source_customer_id", "scd_hash", "start_date"),
+        )
     )
 
     dim_location = _keyed(
@@ -344,6 +357,33 @@ def build_gold_tables(config: AppConfig, spark) -> dict[str, DataFrame]:
         ["natural_shipping_hash"],
     )
 
+    customer_by_order = (
+        orders.alias("customer_order")
+        .join(
+            fact_customer_dimension.select(
+                "customer_key", "source_customer_id", "start_date", "end_date"
+            ).alias("customer_version"),
+            (F.col("customer_order.customer_id") == F.col("customer_version.source_customer_id"))
+            & (F.col("customer_order.created_at") >= F.col("customer_version.start_date"))
+            & (F.col("customer_order.created_at") < F.col("customer_version.end_date")),
+            "left",
+        )
+        .select(
+            F.col("customer_order.order_id").alias("order_id"),
+            F.col("customer_version.customer_key").alias("customer_key"),
+            F.row_number()
+            .over(
+                Window.partitionBy(F.col("customer_order.order_id")).orderBy(
+                    F.col("customer_version.start_date").desc_nulls_last(),
+                    F.col("customer_version.customer_key").desc_nulls_last(),
+                )
+            )
+            .alias("_customer_version_rank"),
+        )
+        .where(F.col("_customer_version_rank") == 1)
+        .drop("_customer_version_rank")
+    )
+
     item_totals = order_items.groupBy("order_id").agg(F.sum("item_subtotal").alias("order_item_subtotal"))
     fact_base = (
         order_items.alias("oi")
@@ -354,11 +394,7 @@ def build_gold_tables(config: AppConfig, spark) -> dict[str, DataFrame]:
             F.col("oi.product_id") == F.col("p.product_id"),
             "left",
         )
-        .join(
-            dim_customer.select("customer_key", "source_customer_id"),
-            F.col("o.customer_id") == F.col("source_customer_id"),
-            "left",
-        )
+        .join(customer_by_order, "order_id", "left")
         .join(
             dim_product.select("product_key", "source_product_variant_id"),
             F.col("oi.product_variant_id") == F.col("source_product_variant_id"),

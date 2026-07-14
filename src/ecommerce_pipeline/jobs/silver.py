@@ -16,6 +16,7 @@ SILVER_SOURCE_COLUMNS: dict[str, tuple[str, ...]] = {
         "phone_number",
         "status",
         "created_at",
+        "updated_at",
         "last_login",
     ),
     "user_addresses": (

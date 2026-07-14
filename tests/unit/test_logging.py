@@ -16,7 +16,11 @@ def test_json_formatter_outputs_structured_record() -> None:
 
 
 def test_configure_logging_sets_root_handler() -> None:
-    configure_logging("WARNING")
-    logger = get_logger("unit")
+    root = logging.getLogger()
+    try:
+        configure_logging("WARNING")
+        logger = get_logger("unit")
 
-    assert logger.getEffectiveLevel() == logging.WARNING
+        assert logger.getEffectiveLevel() == logging.WARNING
+    finally:
+        root.handlers.clear()
