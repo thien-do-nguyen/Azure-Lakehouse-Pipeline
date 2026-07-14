@@ -17,12 +17,23 @@ batch:
   watermark_path: abfss://${AZURE_CONTAINER:lakehouse}@${AZURE_STORAGE_ACCOUNT}.dfs.core.windows.net/ecommerce/_state/watermarks.json
   lookback_minutes: ${BATCH_LOOKBACK_MINUTES:60}
 
+streaming:
+  enabled: ${STREAMING_ENABLED:false}
+  bootstrap_servers: ${KAFKA_BOOTSTRAP_SERVERS:}
+  topic_prefix: ${CDC_TOPIC_PREFIX:ecommerce}
+  starting_offsets: ${STREAM_STARTING_OFFSETS:latest}
+  checkpoint_path: abfss://${AZURE_CONTAINER:lakehouse}@${AZURE_STORAGE_ACCOUNT}.dfs.core.windows.net/ecommerce/_checkpoints/bronze_cdc
+  silver_checkpoint_path: abfss://${AZURE_CONTAINER:lakehouse}@${AZURE_STORAGE_ACCOUNT}.dfs.core.windows.net/ecommerce/_checkpoints/silver_unified
+  dead_letter_path: abfss://${AZURE_CONTAINER:lakehouse}@${AZURE_STORAGE_ACCOUNT}.dfs.core.windows.net/ecommerce/bronze/cdc_dead_letters
+  schema_registry_path: abfss://${AZURE_CONTAINER:lakehouse}@${AZURE_STORAGE_ACCOUNT}.dfs.core.windows.net/ecommerce/_state/cdc_schemas.json
+  trigger_processing_time: ${STREAM_TRIGGER_PROCESSING_TIME:10 seconds}
+
 spark:
   app_name: ecommerce-batch-azure
   master: ${SPARK_MASTER:local[*]}
   config:
     spark.sql.shuffle.partitions: "16"
-    spark.jars.packages: org.postgresql:postgresql:42.7.3,org.apache.hadoop:hadoop-azure:3.3.4
+    spark.jars.packages: org.postgresql:postgresql:42.7.3,org.apache.hadoop:hadoop-azure:3.3.4,org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1
     spark.sql.extensions: io.delta.sql.DeltaSparkSessionExtension
     spark.sql.catalog.spark_catalog: org.apache.spark.sql.delta.catalog.DeltaCatalog
     spark.databricks.delta.schema.autoMerge.enabled: "true"

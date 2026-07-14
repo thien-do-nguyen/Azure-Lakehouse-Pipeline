@@ -20,7 +20,8 @@ wheels/
 .installed.cfg
 *.egg
 
-images/
+docs/
+
 
 # Virtual environments
 .venv/
@@ -37,6 +38,9 @@ ENV/
 data/lake/bronze
 data/lake/silver
 data/lake/gold
+data/lake/_control
+data/checkpoints/
+data/state/
 *.log
 *.jsonl
 

@@ -165,22 +165,17 @@ def _project_table(df, table_name: str):
     return df.select(*available_columns)
 
 
-def run_silver(config: AppConfig, spark) -> None:
-    table_keys = {
-        "app_users": ["user_id"],
-        "user_addresses": ["address_id"],
-        "shops": ["shop_id"],
-        "categories": ["category_id"],
-        "products": ["product_id"],
-        "product_variants": ["product_variant_id"],
-        "vouchers": ["voucher_id"],
-        "orders": ["order_id"],
-        "order_items": ["order_item_id"],
-        "order_vouchers": ["order_voucher_id"],
-        "payments": ["payment_id"],
-        "shipments": ["shipment_id"],
-    }
+def transform_silver_table(df, table_name: str, keys: list[str]):
+    """Apply the shared batch/CDC Silver contract to one current-state table."""
+    if "is_deleted" in df.columns:
+        df = df.where(F.coalesce(F.col("is_deleted"), F.lit(False)) == F.lit(False))
+    return _clean_table(_project_table(df, table_name), keys)
 
-    for table_name, keys in table_keys.items():
+
+def run_silver(config: AppConfig, spark) -> None:
+    for table_name in config.batch.source_tables:
+        keys = config.streaming.primary_keys.get(table_name)
+        if not keys:
+            raise ValueError(f"Missing primary key config for Silver table: {table_name}")
         df = read_layer_table(spark, config, "bronze", table_name)
-        write_layer_table(_clean_table(_project_table(df, table_name), keys), config, "silver", table_name)
+        write_layer_table(transform_silver_table(df, table_name, keys), config, "silver", table_name)

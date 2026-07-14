@@ -10,6 +10,14 @@ from ecommerce_pipeline.logging import get_logger
 logger = get_logger(__name__)
 
 
+def _apply_delta_config(builder: Any) -> Any:
+    return (
+        builder.config("spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension")
+        .config("spark.sql.catalog.spark_catalog", "org.apache.spark.sql.delta.catalog.DeltaCatalog")
+        .config("spark.databricks.delta.schema.autoMerge.enabled", "true")
+    )
+
+
 def _apply_azure_storage_config(builder: Any, config: AppConfig) -> Any:
     """Inject Azure Storage (ABFS / ADLS Gen2) auth into Spark config.
 
@@ -116,19 +124,23 @@ def build_spark(config: AppConfig) -> SparkSession:
         if package.strip()
     ]
 
-    if config.lakehouse.format == "delta":
+    uses_delta = config.lakehouse.format == "delta" or (
+        config.streaming.enabled and config.streaming.storage_format == "delta"
+    )
+
+    if uses_delta:
         try:
             from delta import configure_spark_with_delta_pip
         except ImportError as exc:  # pragma: no cover - environment guard
             raise RuntimeError("Install delta-spark to run Delta Lake jobs.") from exc
 
-        builder = configure_spark_with_delta_pip(builder, extra_packages=extra_packages)
+        builder = _apply_delta_config(configure_spark_with_delta_pip(builder, extra_packages=extra_packages))
 
     if config.spark.master:
         builder = builder.master(config.spark.master)
 
     for key, value in config.spark.config.items():
-        if config.lakehouse.format == "delta" and key == "spark.jars.packages":
+        if uses_delta and key == "spark.jars.packages":
             continue
         builder = builder.config(key, value)
 

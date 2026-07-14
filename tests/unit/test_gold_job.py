@@ -31,7 +31,11 @@ def test_run_gold_uses_delta_merge_for_incremental_tables(monkeypatch, spark, lo
             "dim_product": df,
         },
     )
-    monkeypatch.setattr(gold, "upsert_to_delta", lambda **kwargs: calls.append(("upsert", kwargs["path"], kwargs["keys"])))
+    monkeypatch.setattr(
+        gold,
+        "synchronize_to_delta",
+        lambda **kwargs: calls.append(("synchronize", kwargs["path"], kwargs["keys"])),
+    )
     monkeypatch.setattr(
         gold,
         "scd2_merge",
@@ -46,7 +50,7 @@ def test_run_gold_uses_delta_merge_for_incremental_tables(monkeypatch, spark, lo
     gold.run_gold(config, spark)
 
     assert calls == [
-        ("upsert", config.lakehouse.table_path("gold", "fact_sales"), ["source_order_id", "source_order_item_id"]),
+        ("synchronize", config.lakehouse.table_path("gold", "fact_sales"), ["source_order_id", "source_order_item_id"]),
         ("scd2", config.lakehouse.table_path("gold", "dim_customer"), ["source_customer_id"]),
         ("write", "gold", "dim_product"),
     ]

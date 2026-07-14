@@ -3,6 +3,7 @@ from __future__ import annotations
 from pyspark.sql import functions as F
 
 from ecommerce_pipeline.config import AppConfig
+from ecommerce_pipeline.delta import upsert_to_delta
 from ecommerce_pipeline.io import read_postgres_query, read_postgres_table, write_layer_table
 from ecommerce_pipeline.watermark import get_watermark, update_watermark
 
@@ -52,6 +53,17 @@ def run_bronze(config: AppConfig, spark) -> None:
             .withColumn("_source_schema", F.lit(config.postgres.source_schema))
             .withColumn("_source_table", F.lit(table_name))
         )
-        write_mode = "append" if config.batch.load_type == "incremental" else config.lakehouse.write_mode
-        write_layer_table(df, config, "bronze", table_name, mode=write_mode)
+        if config.batch.load_type == "incremental" and config.lakehouse.format == "delta":
+            keys = config.streaming.primary_keys.get(table_name)
+            if not keys:
+                raise ValueError(f"Missing primary key config for incremental table: {table_name}")
+            upsert_to_delta(
+                spark=spark,
+                df=df,
+                path=config.lakehouse.table_path("bronze", table_name),
+                keys=keys,
+            )
+        else:
+            write_mode = "append" if config.batch.load_type == "incremental" else config.lakehouse.write_mode
+            write_layer_table(df, config, "bronze", table_name, mode=write_mode)
         _save_incremental_watermark(config, table_name, df)

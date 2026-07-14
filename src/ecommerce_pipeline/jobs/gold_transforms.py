@@ -57,19 +57,23 @@ def _payment_method_group(column_name: str):
     )
 
 
+def _read_gold_source_table(spark, config: AppConfig, table_name: str) -> DataFrame:
+    return read_layer_table(spark, config, "silver", table_name)
+
+
 def build_gold_tables(config: AppConfig, spark) -> dict[str, DataFrame]:
-    users = read_layer_table(spark, config, "silver", "app_users")
-    addresses = read_layer_table(spark, config, "silver", "user_addresses")
-    shops = read_layer_table(spark, config, "silver", "shops")
-    categories = read_layer_table(spark, config, "silver", "categories")
-    products = read_layer_table(spark, config, "silver", "products")
-    variants = read_layer_table(spark, config, "silver", "product_variants")
-    vouchers = read_layer_table(spark, config, "silver", "vouchers")
-    orders = read_layer_table(spark, config, "silver", "orders")
-    order_items = read_layer_table(spark, config, "silver", "order_items")
-    order_vouchers = read_layer_table(spark, config, "silver", "order_vouchers")
-    payments = read_layer_table(spark, config, "silver", "payments")
-    shipments = read_layer_table(spark, config, "silver", "shipments")
+    users = _read_gold_source_table(spark, config, "app_users")
+    addresses = _read_gold_source_table(spark, config, "user_addresses")
+    shops = _read_gold_source_table(spark, config, "shops")
+    categories = _read_gold_source_table(spark, config, "categories")
+    products = _read_gold_source_table(spark, config, "products")
+    variants = _read_gold_source_table(spark, config, "product_variants")
+    vouchers = _read_gold_source_table(spark, config, "vouchers")
+    orders = _read_gold_source_table(spark, config, "orders")
+    order_items = _read_gold_source_table(spark, config, "order_items")
+    order_vouchers = _read_gold_source_table(spark, config, "order_vouchers")
+    payments = _read_gold_source_table(spark, config, "payments")
+    shipments = _read_gold_source_table(spark, config, "shipments")
 
     dates = orders.select(F.to_date("created_at").alias("full_date")).distinct()
     dim_date = dates.select(

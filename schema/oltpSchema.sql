@@ -809,6 +809,24 @@ CREATE INDEX idx_reviews_status ON reviews(review_status);
 
 
 -- =====================================================
+-- CDC readiness
+-- =====================================================
+
+ALTER TABLE app_users REPLICA IDENTITY FULL;
+ALTER TABLE user_addresses REPLICA IDENTITY FULL;
+ALTER TABLE shops REPLICA IDENTITY FULL;
+ALTER TABLE categories REPLICA IDENTITY FULL;
+ALTER TABLE products REPLICA IDENTITY FULL;
+ALTER TABLE product_variants REPLICA IDENTITY FULL;
+ALTER TABLE vouchers REPLICA IDENTITY FULL;
+ALTER TABLE orders REPLICA IDENTITY FULL;
+ALTER TABLE order_items REPLICA IDENTITY FULL;
+ALTER TABLE order_vouchers REPLICA IDENTITY FULL;
+ALTER TABLE payments REPLICA IDENTITY FULL;
+ALTER TABLE shipments REPLICA IDENTITY FULL;
+
+
+-- =====================================================
 -- DWH notes:
 --   dim_customer  <- app_users
 --   dim_shop      <- shops

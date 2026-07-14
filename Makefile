@@ -1,7 +1,8 @@
-.PHONY: install install-cloud install-dev preflight init-source bootstrap-source seed seed-stream seed-once run-local run-cloud run-cloud-full run-cloud-incremental validate inspect test lint format docker-build clean
+.PHONY: install install-cloud install-dev preflight init-source bootstrap-source seed seed-stream seed-once cdc-up cdc-down cdc-register cdc-status cdc-dry-run run-stream-local run-stream-once run-batch-local run-local run-cloud run-cloud-full run-cloud-incremental validate inspect test cdc-e2e lint format docker-build clean
 
 PYTHON ?= .venv/bin/python
 CONFIG ?= configs/azure.yaml
+CDC_CONFIG ?= configs/local.yaml
 export PYTHONPATH := $(CURDIR)/src
 
 install:
@@ -36,6 +37,30 @@ seed-stream:
 seed-once:
 	$(PYTHON) -m ecommerce_pipeline.seed.synthetic_data --config $(CONFIG) --customers 100 --orders 500 --reset
 
+cdc-up:
+	docker compose --profile cdc up -d
+
+cdc-down:
+	docker compose --profile cdc down
+
+cdc-register:
+	$(PYTHON) -m ecommerce_pipeline.cdc.register_connector --config $(CDC_CONFIG) --wait
+
+cdc-status:
+	$(PYTHON) -m ecommerce_pipeline.cdc.register_connector --config $(CDC_CONFIG) --status
+
+cdc-dry-run:
+	$(PYTHON) -m ecommerce_pipeline.cdc.register_connector --config $(CDC_CONFIG) --dry-run
+
+run-stream-local:
+	STREAMING_ENABLED=true $(PYTHON) -m ecommerce_pipeline.jobs.run_streaming --config configs/local.yaml
+
+run-stream-once:
+	STREAMING_ENABLED=true $(PYTHON) -m ecommerce_pipeline.jobs.run_streaming --config configs/local.yaml --once
+
+run-batch-local:
+	$(PYTHON) -m ecommerce_pipeline.jobs.run_batch --config configs/local.yaml --validate
+
 run-local:
 	bash scripts/phase1_local_runbook.sh
 
@@ -56,6 +81,9 @@ inspect:
 
 test:
 	$(PYTHON) -m pytest
+
+cdc-e2e:
+	RUN_CDC_E2E=1 $(PYTHON) -m pytest -m e2e --no-cov -v
 
 lint:
 	$(PYTHON) -m ruff check src tests
