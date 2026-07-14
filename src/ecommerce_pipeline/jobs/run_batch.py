@@ -6,6 +6,7 @@ from ecommerce_pipeline.config import load_config
 from ecommerce_pipeline.jobs.bronze import run_bronze
 from ecommerce_pipeline.jobs.gold import run_gold
 from ecommerce_pipeline.jobs.silver import run_silver
+from ecommerce_pipeline.jobs.validate import print_results, run_validations
 from ecommerce_pipeline.logging import configure_logging, get_logger
 from ecommerce_pipeline.metrics import MetricsCollector
 from ecommerce_pipeline.spark import build_spark
@@ -22,6 +23,7 @@ def parse_args() -> argparse.Namespace:
         default="bronze,silver,gold",
         help="Comma-separated layers to run: bronze,silver,gold.",
     )
+    parser.add_argument("--validate", action="store_true", help="Run reconciliation checks before reporting success.")
     return parser.parse_args()
 
 
@@ -47,6 +49,13 @@ def main() -> None:
                 logger.info("Starting gold layer")
                 with metrics.timer("layer", environment=config.environment, layer="gold"):
                     run_gold(config, spark)
+            if args.validate:
+                logger.info("Starting reconciliation validation")
+                results = run_validations(config, spark)
+                print_results(results)
+                failed = [result.name for result in results if not result.passed]
+                if failed:
+                    raise RuntimeError(f"Reconciliation failed: {', '.join(failed)}")
         logger.info("Batch job completed")
     except Exception:
         logger.exception("Batch job failed")

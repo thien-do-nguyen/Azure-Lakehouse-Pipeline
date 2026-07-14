@@ -46,6 +46,7 @@ class _FakeBuilder:
 def test_build_spark_applies_config(monkeypatch, local_config) -> None:
     fake_builder = _FakeBuilder()
     monkeypatch.setattr(spark_module.SparkSession, "builder", fake_builder)
+    monkeypatch.setattr("delta.configure_spark_with_delta_pip", lambda builder, extra_packages=None: builder)
 
     session = spark_module.build_spark(local_config)
 
@@ -64,9 +65,23 @@ def test_build_spark_requires_delta_dependency(monkeypatch, local_config) -> Non
         spark_module.build_spark(config)
 
 
+def test_apply_delta_config_sets_required_extension_and_catalog() -> None:
+    fake_builder = _FakeBuilder()
+
+    spark_module._apply_delta_config(fake_builder)
+
+    assert ("config", "spark.sql.extensions", "io.delta.sql.DeltaSparkSessionExtension") in fake_builder.calls
+    assert (
+        "config",
+        "spark.sql.catalog.spark_catalog",
+        "org.apache.spark.sql.delta.catalog.DeltaCatalog",
+    ) in fake_builder.calls
+
+
 def test_build_spark_injects_account_key_storage_auth(monkeypatch, local_config) -> None:
     fake_builder = _FakeBuilder()
     monkeypatch.setattr(spark_module.SparkSession, "builder", fake_builder)
+    monkeypatch.setattr("delta.configure_spark_with_delta_pip", lambda builder, extra_packages=None: builder)
     monkeypatch.setenv("AZURE_STORAGE_ACCOUNT_KEY", "storage-secret")
     config = replace(
         local_config,

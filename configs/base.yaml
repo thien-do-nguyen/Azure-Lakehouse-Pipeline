@@ -32,10 +32,64 @@ batch:
     payments: updated_at
     shipments: updated_at
 
+streaming:
+  enabled: false
+  source: kafka
+  bootstrap_servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+  topic_prefix: ${CDC_TOPIC_PREFIX:ecommerce}
+  topics:
+    - app_users
+    - user_addresses
+    - shops
+    - categories
+    - products
+    - product_variants
+    - vouchers
+    - orders
+    - order_items
+    - order_vouchers
+    - payments
+    - shipments
+  primary_keys:
+    app_users:
+      - user_id
+    user_addresses:
+      - address_id
+    shops:
+      - shop_id
+    categories:
+      - category_id
+    products:
+      - product_id
+    product_variants:
+      - product_variant_id
+    vouchers:
+      - voucher_id
+    orders:
+      - order_id
+    order_items:
+      - order_item_id
+    order_vouchers:
+      - order_voucher_id
+    payments:
+      - payment_id
+    shipments:
+      - shipment_id
+  starting_offsets: ${STREAM_STARTING_OFFSETS:earliest}
+  checkpoint_path: ./data/checkpoints/bronze_cdc
+  silver_checkpoint_path: ./data/checkpoints/silver_unified
+  dead_letter_path: ./data/lake/bronze/cdc_dead_letters
+  schema_registry_path: ./data/state/cdc_schemas.json
+  storage_format: delta
+  delete_mode: soft
+  gold_layer: gold
+  trigger_processing_time: ${STREAM_TRIGGER_PROCESSING_TIME:10 seconds}
+
 spark:
   config:
     spark.sql.session.timeZone: UTC
     spark.sql.sources.partitionOverwriteMode: dynamic
+    spark.databricks.delta.schema.autoMerge.enabled: "true"
 
 secrets:
   provider: env

@@ -15,6 +15,12 @@ def test_validation_helpers(spark) -> None:
     assert not _money_close(10, 11)
 
 
+def test_active_bronze_excludes_soft_delete_tombstones(spark) -> None:
+    df = spark.createDataFrame([(1, False), (2, True), (3, None)], ["id", "is_deleted"])
+
+    assert [row["id"] for row in validate._active_bronze(df).orderBy("id").collect()] == [1, 3]
+
+
 def test_run_validations_returns_reconciliation_results(monkeypatch, spark, local_config) -> None:
     tables = {
         ("bronze", "orders"): spark.createDataFrame([(100,), (101,)], ["order_id"]),

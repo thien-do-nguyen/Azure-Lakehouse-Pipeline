@@ -9,14 +9,24 @@ postgres:
 
 lakehouse:
   base_path: ./data/lake
-  format: parquet
+  # Delta locally is intentional: tests exercise the same ACID/MERGE semantics
+  # used on ADLS/Databricks instead of a separate Parquet-only code path.
+  format: delta
 
 batch:
   watermark_path: ./data/state/watermarks.json
+
+streaming:
+  enabled: ${STREAMING_ENABLED:false}
+  bootstrap_servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+  checkpoint_path: ./data/checkpoints/bronze_cdc
+  silver_checkpoint_path: ./data/checkpoints/silver_unified
+  dead_letter_path: ./data/lake/bronze/cdc_dead_letters
+  schema_registry_path: ./data/state/cdc_schemas.json
 
 spark:
   app_name: ecommerce-batch-local
   master: local[*]
   config:
     spark.sql.shuffle.partitions: "4"
-    spark.jars.packages: org.postgresql:postgresql:42.7.3
+    spark.jars.packages: org.postgresql:postgresql:42.7.3,org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1

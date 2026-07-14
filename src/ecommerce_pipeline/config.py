@@ -98,6 +98,28 @@ class BatchConfig:
 
 
 @dataclass(frozen=True)
+class StreamingConfig:
+    enabled: bool
+    source: str
+    bootstrap_servers: str
+    topic_prefix: str
+    topics: list[str]
+    primary_keys: dict[str, list[str]]
+    starting_offsets: str
+    checkpoint_path: str
+    silver_checkpoint_path: str
+    dead_letter_path: str
+    schema_registry_path: str
+    storage_format: str
+    delete_mode: str
+    gold_layer: str
+    trigger_processing_time: str
+
+    def topic_for_table(self, source_schema: str, table_name: str) -> str:
+        return f"{self.topic_prefix}.{source_schema}.{table_name}"
+
+
+@dataclass(frozen=True)
 class SparkConfig:
     app_name: str
     master: str | None
@@ -126,9 +148,30 @@ class AppConfig:
     postgres: PostgresConfig
     lakehouse: LakehouseConfig
     batch: BatchConfig
+    streaming: StreamingConfig
     spark: SparkConfig
     secrets: SecretsConfig
     azure_storage: AzureStorageConfig | None = None
+
+
+def _validate_config(config: AppConfig) -> None:
+    if config.batch.load_type not in {"full", "incremental"}:
+        raise ValueError("batch.load_type must be 'full' or 'incremental'")
+    if config.lakehouse.format not in {"delta", "parquet"}:
+        raise ValueError("lakehouse.format must be 'delta' or 'parquet'")
+    if config.streaming.delete_mode not in {"soft", "hard"}:
+        raise ValueError("streaming.delete_mode must be 'soft' or 'hard'")
+    if len(config.batch.source_tables) != len(set(config.batch.source_tables)):
+        raise ValueError("batch.source_tables contains duplicates")
+    if config.streaming.topics != config.batch.source_tables:
+        raise ValueError("streaming.topics must match batch.source_tables in order")
+    missing_keys = [table for table in config.streaming.topics if not config.streaming.primary_keys.get(table)]
+    if missing_keys:
+        raise ValueError(f"Missing streaming.primary_keys for: {', '.join(missing_keys)}")
+    if config.streaming.enabled and (
+        config.lakehouse.format != "delta" or config.streaming.storage_format != "delta"
+    ):
+        raise ValueError("CDC requires Delta for both lakehouse.format and streaming.storage_format")
 
 
 def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -152,6 +195,35 @@ def _build_azure_storage(raw: dict[str, Any]) -> AzureStorageConfig | None:
         container=section.get("container", ""),
         tenant_id=section.get("tenant_id", ""),
         client_id=section.get("client_id", ""),
+    )
+
+
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return bool(value)
+
+
+def _build_streaming(raw: dict[str, Any]) -> StreamingConfig:
+    section = raw["streaming"]
+    return StreamingConfig(
+        enabled=_as_bool(section.get("enabled", False)),
+        source=section.get("source", "kafka"),
+        bootstrap_servers=section.get("bootstrap_servers", ""),
+        topic_prefix=section.get("topic_prefix", "ecommerce"),
+        topics=section.get("topics", []),
+        primary_keys=section.get("primary_keys", {}),
+        starting_offsets=section.get("starting_offsets", "latest"),
+        checkpoint_path=section.get("checkpoint_path", "./data/checkpoints/bronze_cdc"),
+        silver_checkpoint_path=section.get("silver_checkpoint_path", "./data/checkpoints/silver_unified"),
+        dead_letter_path=section.get("dead_letter_path", "./data/lake/bronze/cdc_dead_letters"),
+        schema_registry_path=section.get("schema_registry_path", "./data/state/cdc_schemas.json"),
+        storage_format=section.get("storage_format", "delta"),
+        delete_mode=section.get("delete_mode", "soft"),
+        gold_layer=section.get("gold_layer", "gold"),
+        trigger_processing_time=section.get("trigger_processing_time", "30 seconds"),
     )
 
 
@@ -188,12 +260,15 @@ def load_config(path: str | Path | None = None, env: str | None = None) -> AppCo
 
     raw = _expand_env(raw)
 
-    return AppConfig(
+    config = AppConfig(
         environment=raw["environment"],
         postgres=PostgresConfig(**raw["postgres"]),
         lakehouse=LakehouseConfig(**raw["lakehouse"]),
         batch=BatchConfig(**raw["batch"]),
+        streaming=_build_streaming(raw),
         spark=SparkConfig(**raw["spark"]),
         secrets=SecretsConfig(**raw["secrets"]),
         azure_storage=_build_azure_storage(raw),
     )
+    _validate_config(config)
+    return config

@@ -11,7 +11,7 @@ from ecommerce_pipeline.spark import build_spark
 
 @pytest.mark.integration
 def test_existing_local_lakehouse_validates() -> None:
-    if not Path("data/lake/gold/fact_sales").exists():
+    if not Path("data/lake/gold/fact_sales/_delta_log").exists():
         pytest.skip("Run scripts/phase1_local_runbook.sh before this integration test.")
 
     config = load_config("configs/local.yaml")

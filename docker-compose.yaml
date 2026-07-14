@@ -2,6 +2,14 @@ services:
   postgres:
     image: postgres:16
     container_name: ecommerce_postgres
+    command:
+      - postgres
+      - -c
+      - wal_level=logical
+      - -c
+      - max_wal_senders=10
+      - -c
+      - max_replication_slots=10
     environment:
       POSTGRES_DB: ecommerce
       POSTGRES_USER: admin
@@ -15,6 +23,63 @@ services:
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U admin -d ecommerce"]
       interval: 5s
+      timeout: 5s
+      retries: 12
+
+  redpanda:
+    image: redpandadata/redpanda:v24.2.7
+    container_name: ecommerce_redpanda
+    profiles: ["cdc"]
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp
+      - "1"
+      - --memory
+      - 512M
+      - --reserve-memory
+      - 0M
+      - --node-id
+      - "0"
+      - --check=false
+      - --kafka-addr
+      - PLAINTEXT://0.0.0.0:9092,INTERNAL://0.0.0.0:29092
+      - --advertise-kafka-addr
+      - PLAINTEXT://localhost:9092,INTERNAL://redpanda:29092
+    ports:
+      - "9092:9092"
+      - "9644:9644"
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -E 'Healthy:.+true'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  debezium-connect:
+    image: quay.io/debezium/connect:2.7
+    container_name: ecommerce_debezium_connect
+    profiles: ["cdc"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    environment:
+      BOOTSTRAP_SERVERS: redpanda:29092
+      GROUP_ID: ecommerce-debezium-connect
+      CONFIG_STORAGE_TOPIC: ecommerce_connect_configs
+      OFFSET_STORAGE_TOPIC: ecommerce_connect_offsets
+      STATUS_STORAGE_TOPIC: ecommerce_connect_status
+      KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      CONNECT_KEY_CONVERTER_SCHEMAS_ENABLE: "false"
+      CONNECT_VALUE_CONVERTER_SCHEMAS_ENABLE: "false"
+    ports:
+      - "8083:8083"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8083/connectors >/dev/null"]
+      interval: 10s
       timeout: 5s
       retries: 12
 

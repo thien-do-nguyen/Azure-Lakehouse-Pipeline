@@ -50,6 +50,48 @@ def upsert_to_delta(spark: SparkSession, df: DataFrame, path: str, keys: Sequenc
     )
 
 
+def synchronize_to_delta(spark: SparkSession, df: DataFrame, path: str, keys: Sequence[str]) -> None:
+    """Make a Delta table match a complete source snapshot, including deletes."""
+    if not keys:
+        raise ValueError("synchronize_to_delta requires at least one merge key.")
+    if _ensure_delta_table(spark, df, path):
+        return
+    delta_table = _delta_table_for_path(spark, path)
+    (
+        delta_table.alias("target")
+        .merge(df.alias("source"), _join_condition(keys))
+        .whenMatchedUpdateAll()
+        .whenNotMatchedInsertAll()
+        .whenNotMatchedBySourceDelete()
+        .execute()
+    )
+
+
+def replace_delta_scope(
+    spark: SparkSession,
+    df: DataFrame,
+    path: str,
+    scope_df: DataFrame,
+    scope_key: str,
+    keys: Sequence[str],
+) -> None:
+    """Replace only target rows in an explicitly supplied business-key scope."""
+    if not keys:
+        raise ValueError("replace_delta_scope requires at least one merge key.")
+    if _ensure_delta_table(spark, df, path):
+        return
+
+    delta_table = _delta_table_for_path(spark, path)
+    scoped_keys = scope_df.select(scope_key).where(F.col(scope_key).isNotNull()).distinct()
+    (
+        delta_table.alias("target")
+        .merge(scoped_keys.alias("scope"), f"target.{scope_key} = scope.{scope_key}")
+        .whenMatchedDelete()
+        .execute()
+    )
+    upsert_to_delta(spark, df, path, keys)
+
+
 def add_scd2_hash(df: DataFrame, tracked_columns: Sequence[str], hash_column: str = "scd_hash") -> DataFrame:
     return df.withColumn(
         hash_column,

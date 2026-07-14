@@ -24,6 +24,12 @@ def _count(df: DataFrame) -> int:
     return int(df.count())
 
 
+def _active_bronze(df: DataFrame) -> DataFrame:
+    if "is_deleted" not in df.columns:
+        return df
+    return df.where(F.coalesce(F.col("is_deleted"), F.lit(False)) == F.lit(False))
+
+
 def _duplicate_count(df: DataFrame, keys: list[str]) -> int:
     return int(df.groupBy(*keys).count().where(F.col("count") > 1).count())
 
@@ -63,7 +69,7 @@ def run_validations(config, spark) -> list[ValidationResult]:
 
     results: list[ValidationResult] = []
 
-    bronze_order_count = _count(bronze_orders)
+    bronze_order_count = _count(_active_bronze(bronze_orders))
     silver_order_count = _count(silver_orders)
     results.append(
         _result(
@@ -74,7 +80,7 @@ def run_validations(config, spark) -> list[ValidationResult]:
         )
     )
 
-    bronze_item_count = _count(bronze_order_items)
+    bronze_item_count = _count(_active_bronze(bronze_order_items))
     silver_item_count = _count(silver_order_items)
     fact_count = _count(gold_fact_sales)
     results.append(

@@ -2,9 +2,12 @@
 
 Local-first, cloud-ready implementation for the architecture
 
+See [`docs/enterprise-readiness.md`](docs/enterprise-readiness.md) for the
+evidence-based readiness assessment and Azure production gaps.
+
 The same Python code runs both modes:
 
-- Local: PostgreSQL in Docker, lakehouse files under `data/lake`, Parquet format.
+- Local: PostgreSQL, Redpanda and Debezium in Docker; Delta Lake under `data/lake`.
 
 ## Folder Structure
 
@@ -57,6 +60,59 @@ make lint
 make docker-build
 ```
 
+CDC/streaming local commands:
+
+```bash
+CONFIG=configs/local.yaml make cdc-up
+CONFIG=configs/local.yaml make init-source
+CONFIG=configs/local.yaml make seed-once
+CONFIG=configs/local.yaml make cdc-register
+CONFIG=configs/local.yaml make cdc-status
+CONFIG=configs/local.yaml make seed-stream
+make run-stream-local
+```
+
+Always bootstrap the common Delta tables with a full batch before starting CDC.
+The shortest reproducible flow is:
+
+```bash
+make cdc-up
+CONFIG=configs/local.yaml make seed-once
+make run-batch-local
+make cdc-register
+# terminal 1
+make run-stream-local
+# terminal 2
+CONFIG=configs/local.yaml make seed-stream
+```
+
+`cdc-up` starts PostgreSQL with logical replication plus Redpanda and Debezium
+Connect. `cdc-register` creates the PostgreSQL Debezium connector and waits for
+the connector/tasks to become healthy. It monitors every table used by batch:
+
+```text
+app_users, user_addresses, shops, categories, products, product_variants,
+vouchers, orders, order_items, order_vouchers, payments, shipments
+```
+
+The local Kafka-compatible topics follow this contract:
+
+```text
+ecommerce.customer_app.<table_name>
+```
+
+The streaming Bronze job writes raw CDC events to:
+
+```text
+data/lake/bronze/cdc_events
+```
+
+Invalid CDC records are written to:
+
+```text
+data/lake/bronze/cdc_dead_letters
+```
+
 `make seed` resets and bootstraps the OLTP database, then keeps inserting small
 order batches every few seconds for incremental/CDC demos. Use `make seed-once`
 for the old one-shot reset seed, or `make seed-stream` to append realtime-like
@@ -104,7 +160,7 @@ that. Keep `.env` for stable infrastructure settings only; load type is a run
 parameter.
 
 Use `CONFIG=configs/local.yaml make <target>` when you want the old fully local
-Docker/PostgreSQL + local Parquet mode.
+Docker/PostgreSQL/Redpanda mode. Local and Azure both use Delta semantics.
 
 CI/CD lives in:
 
@@ -172,7 +228,7 @@ The code already isolates these differences in config:
 
 - JDBC host/user/password
 - lakehouse `base_path`
-- storage format `parquet` vs `delta`
+- lakehouse base path and Spark runtime/storage authentication
 - Spark settings
 
 No pipeline logic should be forked between local and Azure.
@@ -230,20 +286,73 @@ batch:
 Bronze will then:
 
 - read only configured tables with `updated_at > previous_watermark - lookback`
-- append new rows into Bronze
+- merge new rows into the existing Delta Bronze table by primary key
 - store watermarks in `data/state/watermarks.json`
 
-Silver and Gold still rebuild from available Bronze data in this phase. This keeps reruns simple while preparing the project for proper incremental merge/SCD Type 2 later.
+Silver and Gold read the same unified tables used by CDC. Batch incremental is a
+fallback/reconciliation path; deletes are authoritative through CDC.
+
+## CDC / Streaming Design
+
+Local CDC uses PostgreSQL logical replication, Debezium Connect, and Redpanda.
+This keeps the local architecture close to Kafka-compatible cloud options such
+as Azure Event Hubs Kafka API, Confluent Cloud, or a Kafka cluster.
+
+Bronze streaming stores raw Debezium envelopes first. It keeps Kafka metadata,
+operation type, source metadata, `before` JSON, `after` JSON, and ingestion time.
+Bad records are routed to a dead-letter Delta table instead of stopping the
+stream.
+
+Silver streaming reads the immutable Bronze CDC event log, validates table
+schemas, deduplicates by event id and primary key, then merges the latest row
+into the same `bronze/<table>` current-state Delta table created by batch. It
+immediately applies the shared Silver transform and performs row-level
+`DELETE/MERGE` on `silver/<table>`. No CDC micro-batch overwrites Silver. Deletes
+default to soft delete in Bronze and are removed from Silver; `delete_mode: hard`
+physically deletes them from both current-state layers.
+
+Gold CDC resolves both `before` and `after` relationships to impacted `order_id`
+values. Dimensions use Delta MERGE and `fact_sales` replaces only rows inside
+that order scope, so source deletes remove stale facts without a full Gold
+overwrite. There are no `silver_cdc` or `gold_cdc` data products.
+
+Each Silver/Gold micro-batch is tracked in Delta control tables:
+
+```text
+_control/cdc_batch_commits
+_control/cdc_table_watermarks
+```
+
+A failed or interrupted batch remains retryable; a committed batch is skipped.
+Watermarks are stored per topic/partition rather than as a process-local JSON
+offset. The ledger key fingerprints topic/partition offset ranges, so checkpoint
+replay cannot confuse a new batch boundary with an old `batch_id`.
+
+Run the automated Docker restart/replay lifecycle with `make cdc-e2e`. This
+opt-in test intentionally resets the local Compose volumes and generated lake
+data, then cleans the Docker stack when it finishes.
+
+Batch Bronze remains available for full refreshes, backfills, reconciliation,
+and simpler local debugging.
+
+For Azure, keep the same job code and change only config:
+
+- `streaming.bootstrap_servers`
+- `streaming.checkpoint_path`
+- `streaming.silver_checkpoint_path`
+- `streaming.schema_registry_path`
+- `lakehouse.base_path`
+- Spark/auth settings
 
 ## Delta Lake Merge
 
 When `lakehouse.format: delta`, Gold uses Delta merge semantics:
 
-- `fact_sales`: `upsert_to_delta()` with keys `source_order_id, source_order_item_id`
+- `fact_sales`: full-source Delta synchronization (upsert plus delete of stale facts)
 - `dim_customer`: `scd2_merge()` with natural key `source_customer_id` and `scd_hash`
 - Other Gold tables: standard Delta overwrite for MVP simplicity
 
-Local config stays Parquet by default. Azure config uses Delta:
+Local and Azure both use Delta so local tests cover ACID and `MERGE` behavior:
 
 ```yaml
 lakehouse:
