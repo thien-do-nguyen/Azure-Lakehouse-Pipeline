@@ -70,15 +70,11 @@ addopts = "--cov=ecommerce_pipeline --cov-report=term-missing --cov-fail-under=8
 branch = true
 source = ["src/ecommerce_pipeline"]
 omit = [
-    "src/ecommerce_pipeline/delta.py",
     "src/ecommerce_pipeline/seed/*",
     "src/ecommerce_pipeline/orchestration/*",
     "src/ecommerce_pipeline/preflight.py",
     "src/ecommerce_pipeline/cdc/register_connector.py",
     "src/ecommerce_pipeline/jobs/inspect.py",
-    "src/ecommerce_pipeline/jobs/run_batch.py",
-    "src/ecommerce_pipeline/jobs/run_streaming.py",
-    "src/ecommerce_pipeline/jobs/gold_transforms.py",
     "src/ecommerce_pipeline/secrets.py",
 ]
 

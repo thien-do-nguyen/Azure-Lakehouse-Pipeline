@@ -38,11 +38,16 @@ def test_run_gold_incremental_replaces_only_affected_fact_scope(monkeypatch, spa
         "dim_promotion": spark.createDataFrame([("p",)], ["natural_promotion_hash"]),
         "dim_payment": spark.createDataFrame([("pay",)], ["natural_payment_hash"]),
         "dim_shipping": spark.createDataFrame([("ship",)], ["natural_shipping_hash"]),
-        "fact_sales": spark.createDataFrame([(1, 10), (2, 20)], ["source_order_id", "source_order_item_id"]),
+        "fact_sales": spark.createDataFrame(
+            [(1, 10, 20260101, 120000, 1), (2, 20, 20260101, 120000, 1)],
+            ["source_order_id", "source_order_item_id", "order_date_key", "order_time_key", "promotion_key"],
+        ),
     }
     calls = []
     monkeypatch.setattr(gold_incremental, "impacted_order_ids", lambda *_args: affected)
-    monkeypatch.setattr(gold_incremental, "build_gold_tables", lambda *_args: tables)
+    monkeypatch.setattr(gold_incremental, "build_gold_tables", lambda *_args, **_kwargs: tables)
+    monkeypatch.setattr(gold_incremental, "read_layer_table", lambda *_args: tables["dim_customer"])
+    monkeypatch.setattr(gold_incremental, "_impacted_dimension", lambda _name, df, *_args: df)
     monkeypatch.setattr(gold_incremental, "scd2_merge", lambda **_kwargs: calls.append("scd2"))
     monkeypatch.setattr(gold_incremental, "upsert_to_delta", lambda *_args, **_kwargs: calls.append("dimension"))
     monkeypatch.setattr(
@@ -50,12 +55,33 @@ def test_run_gold_incremental_replaces_only_affected_fact_scope(monkeypatch, spa
         "replace_delta_scope",
         lambda **kwargs: calls.append(("facts", [row["source_order_id"] for row in kwargs["df"].collect()])),
     )
-    events = spark.createDataFrame(
-        [(table_name, True) for table_name in gold_incremental.SOURCE_DIMENSIONS],
-        ["table_name", "is_valid_event"],
-    )
+    events = spark.createDataFrame([("orders", True)], ["table_name", "is_valid_event"])
 
     gold_incremental.run_gold_incremental(local_config, spark, events)
 
-    assert calls.count("dimension") == 9
+    assert calls.count("dimension") == 3
     assert ("facts", [2]) in calls
+
+
+def test_impacted_product_dimension_filters_by_product_and_variant_keys(spark) -> None:
+    dimension = spark.createDataFrame(
+        [(10, 100), (20, 200), (30, 300)],
+        ["source_product_id", "source_product_variant_id"],
+    )
+    events = spark.createDataFrame(
+        [
+            ("products", '{"product_id":10}', '{"product_id":10}'),
+            ("product_variants", '{"product_variant_id":200}', '{"product_variant_id":200}'),
+        ],
+        ["table_name", "before_json", "after_json"],
+    )
+    affected_facts = spark.createDataFrame([], "product_key long")
+
+    rows = gold_incremental._impacted_dimension(
+        "dim_product", dimension, events, affected_facts
+    ).orderBy("source_product_id").collect()
+
+    assert [(row["source_product_id"], row["source_product_variant_id"]) for row in rows] == [
+        (10, 100),
+        (20, 200),
+    ]

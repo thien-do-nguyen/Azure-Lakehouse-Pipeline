@@ -42,6 +42,30 @@ def _null_count(df: DataFrame, columns: list[str]) -> int:
     return int(df.where(condition).count()) if condition is not None else 0
 
 
+def _orphan_count(
+    fact: DataFrame,
+    dimension: DataFrame,
+    fact_key: str,
+    dimension_key: str,
+    allow_unknown_zero: bool = False,
+) -> int:
+    candidates = fact.select(F.col(fact_key).alias("foreign_key")).where(F.col("foreign_key").isNotNull()).distinct()
+    if allow_unknown_zero:
+        candidates = candidates.where(F.col("foreign_key") != F.lit(0))
+    dimension_keys = dimension.select(F.col(dimension_key).alias("dimension_key")).distinct()
+    return int(candidates.join(dimension_keys, F.col("foreign_key") == F.col("dimension_key"), "left_anti").count())
+
+
+def _optional_count(spark, config, layer: str, table_name: str, condition=None) -> int:
+    try:
+        df = read_layer_table(spark, config, layer, table_name)
+    except Exception:
+        return 0
+    if condition is not None:
+        df = df.where(condition)
+    return _count(df)
+
+
 def _sum_decimal(df: DataFrame, column: str) -> Decimal:
     value = df.agg(F.sum(F.col(column)).alias("value")).collect()[0]["value"]
     return Decimal("0") if value is None else Decimal(str(value))
@@ -66,6 +90,31 @@ def run_validations(config, spark) -> list[ValidationResult]:
     gold_fact_sales = read_layer_table(spark, config, "gold", "fact_sales")
     gold_dim_customer = read_layer_table(spark, config, "gold", "dim_customer")
     gold_dim_product = read_layer_table(spark, config, "gold", "dim_product")
+    gold_dimensions = {
+        "customer_key": (gold_dim_customer, "customer_key", False),
+        "product_key": (gold_dim_product, "product_key", False),
+        "shop_key": (read_layer_table(spark, config, "gold", "dim_shop"), "shop_key", False),
+        "category_key": (read_layer_table(spark, config, "gold", "dim_category"), "category_key", False),
+        "ship_to_location_key": (
+            read_layer_table(spark, config, "gold", "dim_location"),
+            "location_key",
+            False,
+        ),
+        "bill_to_location_key": (
+            read_layer_table(spark, config, "gold", "dim_location"),
+            "location_key",
+            False,
+        ),
+        "order_date_key": (read_layer_table(spark, config, "gold", "dim_date"), "date_key", False),
+        "order_time_key": (read_layer_table(spark, config, "gold", "dim_time"), "time_key", False),
+        "promotion_key": (
+            read_layer_table(spark, config, "gold", "dim_promotion"),
+            "promotion_key",
+            True,
+        ),
+        "payment_key": (read_layer_table(spark, config, "gold", "dim_payment"), "payment_key", True),
+        "shipping_key": (read_layer_table(spark, config, "gold", "dim_shipping"), "shipping_key", True),
+    }
 
     results: list[ValidationResult] = []
 
@@ -97,7 +146,7 @@ def run_validations(config, spark) -> list[ValidationResult]:
         )
     )
 
-    source_order_count = int(silver_orders.select("order_id").distinct().count())
+    source_order_count = int(silver_order_items.select("order_id").distinct().count())
     fact_order_count = int(gold_fact_sales.select("source_order_id").distinct().count())
     results.append(
         _result(
@@ -141,12 +190,70 @@ def run_validations(config, spark) -> list[ValidationResult]:
     results.append(_result("tax_amount_reconciled", _money_close(silver_tax, fact_tax), silver_tax, fact_tax))
 
     customer_count = _count(silver_users)
-    dim_customer_count = _count(gold_dim_customer)
+    current_customers = gold_dim_customer.where(F.col("is_current") == F.lit(True))
+    dim_customer_count = _count(current_customers)
     results.append(
         _result(
             "dim_customer_count_reconciled", customer_count == dim_customer_count, customer_count, dim_customer_count
         )
     )
+
+    customer_current_duplicates = int(
+        gold_dim_customer.groupBy("source_customer_id")
+        .agg(F.sum(F.col("is_current").cast("int")).alias("current_count"))
+        .where(F.col("current_count") != 1)
+        .count()
+    )
+    results.append(
+        _result("dim_customer_exactly_one_current", customer_current_duplicates == 0, 0, customer_current_duplicates)
+    )
+    customer_interval_overlaps = int(
+        gold_dim_customer.alias("left")
+        .join(
+            gold_dim_customer.alias("right"),
+            (F.col("left.source_customer_id") == F.col("right.source_customer_id"))
+            & (F.col("left.customer_key") < F.col("right.customer_key"))
+            & (F.col("left.start_date") < F.col("right.end_date"))
+            & (F.col("right.start_date") < F.col("left.end_date")),
+            "inner",
+        )
+        .count()
+    )
+    results.append(
+        _result("dim_customer_intervals_do_not_overlap", customer_interval_overlaps == 0, 0, customer_interval_overlaps)
+    )
+
+    for name, df, keys in [
+        ("dim_customer_surrogate_key_unique", gold_dim_customer, ["customer_key"]),
+        ("dim_customer_current_business_key_unique", current_customers, ["source_customer_id"]),
+        ("dim_product_business_key_unique", gold_dim_product, ["source_product_variant_id"]),
+    ]:
+        duplicates = _duplicate_count(df, keys)
+        nulls = _null_count(df, keys)
+        results.append(_result(name, duplicates == 0, 0, duplicates))
+        results.append(_result(f"{name}_not_null", nulls == 0, 0, nulls))
+
+    for fact_key, (dimension, dimension_key, allow_zero) in gold_dimensions.items():
+        orphans = _orphan_count(gold_fact_sales, dimension, fact_key, dimension_key, allow_zero)
+        results.append(_result(f"fact_sales_{fact_key}_orphan_count", orphans == 0, 0, orphans))
+
+    source_latest_row = silver_orders.agg(F.max("created_at").alias("value")).first()
+    gold_latest_row = gold_fact_sales.agg(F.max("updated_at").alias("value")).first()
+    source_latest = source_latest_row["value"] if source_latest_row is not None else None
+    gold_latest = gold_latest_row["value"] if gold_latest_row is not None else None
+    freshness_ok = source_latest is None or (gold_latest is not None and gold_latest >= source_latest)
+    results.append(_result("fact_sales_freshness", freshness_ok, f">={source_latest}", gold_latest))
+
+    dlq_count = _optional_count(spark, config, "bronze", "cdc_dead_letters")
+    results.append(_result("cdc_dead_letter_count", dlq_count == 0, 0, dlq_count))
+    failed_batches = _optional_count(
+        spark,
+        config,
+        "_control",
+        "cdc_batch_commits",
+        F.col("status") == F.lit("FAILED"),
+    )
+    results.append(_result("cdc_failed_batch_count", failed_batches == 0, 0, failed_batches))
 
     product_variant_count = int(
         read_layer_table(spark, config, "silver", "product_variants").select("product_variant_id").distinct().count()
@@ -168,7 +275,9 @@ def run_validations(config, spark) -> list[ValidationResult]:
         ("silver_shipments_key_unique", silver_shipments, ["shipment_id"]),
     ]:
         duplicates = _duplicate_count(df, keys)
+        nulls = _null_count(df, keys)
         results.append(_result(name, duplicates == 0, 0, duplicates))
+        results.append(_result(f"{name}_not_null", nulls == 0, 0, nulls))
 
     return results
 

@@ -8,6 +8,7 @@ from pyspark.sql.types import DateType, LongType, StructField, StructType, Times
 
 from ecommerce_pipeline.cdc import merge_handler
 from ecommerce_pipeline.cdc.merge_handler import CdcMergeHandler, latest_event_per_key
+from ecommerce_pipeline.cdc.schema_registry import CdcSchemaRegistry, SchemaCompatibilityError
 
 
 def test_merge_handler_prepares_latest_event_per_primary_key(spark, local_config, tmp_path) -> None:
@@ -79,6 +80,46 @@ def test_merge_handler_requires_primary_key_config(spark, local_config, tmp_path
 
     with pytest.raises(ValueError, match="Missing CDC primary key"):
         CdcMergeHandler(config, spark)._primary_keys("orders")
+
+
+def test_merge_handler_fails_clearly_before_merging_breaking_schema(spark, local_config, tmp_path) -> None:
+    registry = CdcSchemaRegistry(str(tmp_path / "schemas.json"))
+    registry.resolve_table_schema(
+        "orders",
+        spark.createDataFrame([('{"order_id":1,"order_status":"pending"}',)], ["record_json"]),
+        ["order_id"],
+    )
+    events = spark.createDataFrame(
+        [
+            (
+                "orders",
+                "UPDATE",
+                '{"order_id":1}',
+                '{"order_id":"invalid-type","order_status":"pending"}',
+                datetime(2026, 1, 1),
+                "event-1",
+                "topic",
+                0,
+                1,
+                True,
+            )
+        ],
+        [
+            "table_name",
+            "operation",
+            "primary_key_json",
+            "record_json",
+            "event_ts",
+            "_cdc_event_id",
+            "_kafka_topic",
+            "_kafka_partition",
+            "_kafka_offset",
+            "is_valid_event",
+        ],
+    )
+
+    with pytest.raises(SchemaCompatibilityError, match="datatype changed for order_id"):
+        CdcMergeHandler(local_config, spark, registry=registry)._prepare_table_events("orders", events)
 
 
 def test_merge_handler_rejects_non_delta_silver_merge(spark, local_config, tmp_path) -> None:
