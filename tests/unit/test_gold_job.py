@@ -54,7 +54,7 @@ def test_run_gold_uses_delta_merge_for_incremental_tables(monkeypatch, spark, lo
         "read_layer_table",
         lambda *_args: customer_source if _args[-1] == "app_users" else customer_history,
     )
-    monkeypatch.setattr(gold, "build_dim_customer", lambda _df: df)
+    monkeypatch.setattr(gold, "build_dim_customer", lambda _users, _orders: df)
 
     gold.run_gold(config, spark)
 

@@ -150,6 +150,29 @@ def scd2_merge(
     delta_table = _delta_table_for_path(spark, path)
     current_target = spark.read.format("delta").load(path).where(F.col(current_col) == F.lit(True))
     target_columns = set(current_target.columns)
+
+    # Apply Type-1/backfill updates before a Type-2 change is closed and its
+    # replacement is inserted.  Doing this afterward also matches the newly
+    # inserted current version, which can move its start date backward and
+    # overlap the closed interval.
+    same_version_updates = {column: f"source.{column}" for column in type1_columns if column in target_columns}
+    if start_date_col in target_columns and start_date_col in prepared_source.columns:
+        same_version_updates[start_date_col] = f"least(target.{start_date_col}, source.{start_date_col})"
+    if same_version_updates:
+        if "updated_at" in target_columns:
+            same_version_updates["updated_at"] = "current_timestamp()"
+        same_version_condition = (
+            " AND ".join(f"target.{key} = source.{key}" for key in natural_keys)
+            + f" AND target.{current_col} = true"
+            + f" AND target.{tracked_hash_column} = source.{tracked_hash_column}"
+        )
+        (
+            delta_table.alias("target")
+            .merge(prepared_source.alias("source"), same_version_condition)
+            .whenMatchedUpdate(set=same_version_updates)
+            .execute()
+        )
+
     change_condition = (
         " AND ".join(f"target.{key} = source.{key}" for key in natural_keys)
         + f" AND target.{current_col} = true"
@@ -220,21 +243,3 @@ def scd2_merge(
             ).cast("long"),
         )
     new_versions.write.format("delta").mode("append").save(path)
-
-    same_version_updates = {column: f"source.{column}" for column in type1_columns if column in target_columns}
-    if start_date_col in target_columns and start_date_col in prepared_source.columns:
-        same_version_updates[start_date_col] = f"least(target.{start_date_col}, source.{start_date_col})"
-    if same_version_updates:
-        if "updated_at" in target_columns:
-            same_version_updates["updated_at"] = "current_timestamp()"
-        same_version_condition = (
-            " AND ".join(f"target.{key} = source.{key}" for key in natural_keys)
-            + f" AND target.{current_col} = true"
-            + f" AND target.{tracked_hash_column} = source.{tracked_hash_column}"
-        )
-        (
-            delta_table.alias("target")
-            .merge(prepared_source.alias("source"), same_version_condition)
-            .whenMatchedUpdate(set=same_version_updates)
-            .execute()
-        )
